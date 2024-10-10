@@ -1,0 +1,306 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Mail;
+using System.Text;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+
+namespace SimpleHotelService
+{
+    class Program
+    {
+        static async Task Main(string[] args)
+        {
+            // Створюємо HTTP-сервер
+            HttpListener listener = new HttpListener();
+            listener.Prefixes.Add("http://localhost:8080/");
+            listener.Start();
+            Console.WriteLine("Сервер запущено на http://localhost:8080/");
+
+            // Список готелів (симуляція бази даних)
+            List<Hotel> hotels = new List<Hotel>
+            {
+                new Hotel { Id = 1, Name = "Grand Hotel", Location = "Kyiv", NumberOfRooms = 100, PricePerNight = 1500, Amenities = "WiFi, Pool, Gym" },
+                new Hotel { Id = 2, Name = "Sea View", Location = "Odessa", NumberOfRooms = 80, PricePerNight = 1200, Amenities = "Sea Access, Breakfast, Parking" }
+            };
+
+            while (true)
+            {
+                try
+                {
+                    // Очікуємо на підключення клієнта
+                    HttpListenerContext context = await listener.GetContextAsync();
+                    HttpListenerRequest request = context.Request;
+                    HttpListenerResponse response = context.Response;
+
+                    // Логування запиту
+                    Console.WriteLine($"Запит отримано: {request.HttpMethod} {request.Url.AbsolutePath}");
+
+                    string responseString = "";
+                    response.ContentType = "application/json";
+
+                    if (request.HttpMethod == "GET")
+                    {
+                        if (request.Url.AbsolutePath == "/api/hotels")
+                        {
+                            // Повертаємо список готелів у форматі JSON
+                            responseString = JsonConvert.SerializeObject(hotels, Newtonsoft.Json.Formatting.Indented);
+                        }
+                        else if (request.Url.AbsolutePath.StartsWith("/api/hotels/"))
+                        {
+                            // Отримуємо ID готелю з URL
+                            var idStr = request.Url.AbsolutePath.Split('/')[3];
+                            if (int.TryParse(idStr, out int id))
+                            {
+                                // Шукаємо готель за ID
+                                var hotel = hotels.Find(h => h.Id == id);
+                                if (hotel != null)
+                                {
+                                    responseString = JsonConvert.SerializeObject(hotel, Newtonsoft.Json.Formatting.Indented);
+                                }
+                                else
+                                {
+                                    responseString = "{\"error\": \"Hotel not found\"}";
+                                    response.StatusCode = (int)HttpStatusCode.NotFound;
+                                }
+                            }
+                            else
+                            {
+                                responseString = "{\"error\": \"Invalid ID format\"}";
+                                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                            }
+                        }
+                        else
+                        {
+                            responseString = "{\"error\": \"Invalid endpoint\"}";
+                            response.StatusCode = (int)HttpStatusCode.NotFound;
+                        }
+                    }
+                    else if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/api/hotels")
+                    {
+                        // Читаємо дані з запиту
+                        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                        {
+                            string jsonString = reader.ReadToEnd();
+                            if (!string.IsNullOrEmpty(jsonString))
+                            {
+                                var newHotel = JsonConvert.DeserializeObject<Hotel>(jsonString);
+                                if (newHotel != null)
+                                {
+                                    newHotel.Id = hotels.Max(h => h.Id) + 1; // Генеруємо новий ID
+                                    hotels.Add(newHotel);
+                                    responseString = JsonConvert.SerializeObject(newHotel, Newtonsoft.Json.Formatting.Indented);
+                                    response.StatusCode = (int)HttpStatusCode.Created;
+                                }
+                                else
+                                {
+                                    responseString = "{\"error\": \"Invalid hotel data\"}";
+                                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                }
+                            }
+                            else
+                            {
+                                responseString = "{\"error\": \"Empty request body\"}";
+                                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                            }
+                        }
+                    }
+                    else if (request.HttpMethod == "PUT" && request.Url.AbsolutePath.StartsWith("/api/hotels/"))
+                    {
+                        // Отримуємо ID готелю з URL
+                        var idStr = request.Url.AbsolutePath.Split('/')[3];
+                        if (int.TryParse(idStr, out int id))
+                        {
+                            // Читаємо дані з запиту
+                            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                            {
+                                string jsonString = reader.ReadToEnd();
+                                if (!string.IsNullOrEmpty(jsonString))
+                                {
+                                    var updatedHotel = JsonConvert.DeserializeObject<Hotel>(jsonString);
+                                    if (updatedHotel != null)
+                                    {
+                                        var existingHotel = hotels.Find(h => h.Id == id);
+                                        if (existingHotel != null)
+                                        {
+                                            existingHotel.Name = updatedHotel.Name;
+                                            existingHotel.Location = updatedHotel.Location;
+                                            existingHotel.NumberOfRooms = updatedHotel.NumberOfRooms;
+                                            existingHotel.PricePerNight = updatedHotel.PricePerNight;
+                                            existingHotel.Amenities = updatedHotel.Amenities;
+                                            responseString = JsonConvert.SerializeObject(existingHotel, Newtonsoft.Json.Formatting.Indented);
+                                        }
+                                        else
+                                        {
+                                            responseString = "{\"error\": \"Hotel not found\"}";
+                                            response.StatusCode = (int)HttpStatusCode.NotFound;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        responseString = "{\"error\": \"Invalid hotel data\"}";
+                                        response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                    }
+                                }
+                                else
+                                {
+                                    responseString = "{\"error\": \"Empty request body\"}";
+                                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            responseString = "{\"error\": \"Invalid ID format\"}";
+                            response.StatusCode = (int)HttpStatusCode.BadRequest;
+                        }
+                    }
+                    else if (request.HttpMethod == "DELETE" && request.Url.AbsolutePath.StartsWith("/api/hotels/"))
+                    {
+                        // Отримуємо ID готелю з URL
+                        var idStr = request.Url.AbsolutePath.Split('/')[3];
+                        if (int.TryParse(idStr, out int id))
+                        {
+                            var hotel = hotels.Find(h => h.Id == id);
+                            if (hotel != null)
+                            {
+                                hotels.Remove(hotel);
+                                responseString = "{\"message\": \"Hotel deleted\"}";
+                            }
+                            else
+                            {
+                                responseString = "{\"error\": \"Hotel not found\"}";
+                                response.StatusCode = (int)HttpStatusCode.NotFound;
+                            }
+                        }
+                        else
+                        {
+                            responseString = "{\"error\": \"Invalid ID format\"}";
+                            response.StatusCode = (int)HttpStatusCode.BadRequest;
+                        }
+                    }
+                    else if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/api/booking")
+                    {
+                        // Читаємо дані з запиту
+                        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                        {
+                            string jsonString = reader.ReadToEnd();
+                            if (!string.IsNullOrEmpty(jsonString))
+                            {
+                                var bookingRequest = JsonConvert.DeserializeObject<BookingRequest>(jsonString);
+                                if (bookingRequest != null)
+                                {
+                                    // Логіка бронювання
+                                    SendEmailConfirmation(bookingRequest.Email, bookingRequest.HotelName, bookingRequest.CheckInDate, bookingRequest.CheckOutDate);
+
+                                    responseString = "{\"message\": \"Booking confirmed\"}";
+                                    response.StatusCode = (int)HttpStatusCode.Created;
+                                }
+                                else
+                                {
+                                    responseString = "{\"error\": \"Invalid booking data\"}";
+                                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                                }
+                            }
+                            else
+                            {
+                                responseString = "{\"error\": \"Empty request body\"}";
+                                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        responseString = "{\"error\": \"Method not allowed\"}";
+                        response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                    }
+
+                    // Відправляємо відповідь
+                    byte[] buffer = Encoding.UTF8.GetBytes(responseString);
+                    response.ContentLength64 = buffer.Length;
+                    using (Stream output = response.OutputStream)
+                    {
+                        await output.WriteAsync(buffer, 0, buffer.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Логування помилки
+                    Console.WriteLine($"Помилка: {ex.Message}");
+
+                    // Відправляємо відповідь про помилку
+                    string errorMessage = "{\"error\": \"Internal server error\"}";
+                    byte[] buffer = Encoding.UTF8.GetBytes(errorMessage);
+                    HttpListenerContext context = await listener.GetContextAsync();
+                    HttpListenerResponse response = context.Response;
+                    response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                    response.ContentLength64 = buffer.Length;
+                    using (Stream output = response.OutputStream)
+                    {
+                        await output.WriteAsync(buffer, 0, buffer.Length);
+                    }
+                }
+            }
+        }
+
+        // Метод для надсилання підтвердження по електронній пошті
+        static void SendEmailConfirmation(string recipientEmail, string hotelName, DateTime checkInDate, DateTime checkOutDate)
+        {
+            // Налаштування поштового сервера
+            string smtpServer = "smtp.ukr.net";
+            int smtpPort = 587; // Зазвичай 587 для TLS
+            string smtpUser = "test@gmail.com";
+            string smtpPassword = "12345678";
+
+            // Створюємо повідомлення
+            MailMessage mail = new MailMessage
+            {
+                From = new MailAddress(smtpUser),
+                Subject = "Booking Confirmation",
+                Body = $"Your booking at {hotelName} has been confirmed.\nCheck-in: {checkInDate.ToShortDateString()}\nCheck-out: {checkOutDate.ToShortDateString()}",
+                IsBodyHtml = false
+            };
+            mail.To.Add(recipientEmail);
+
+            // Відправляємо повідомлення
+            SmtpClient smtpClient = new SmtpClient(smtpServer, smtpPort)
+            {
+                Credentials = new NetworkCredential(smtpUser, smtpPassword),
+                EnableSsl = true
+            };
+
+            try
+            {
+                smtpClient.Send(mail);
+                Console.WriteLine("Email sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error sending email: {ex.Message}");
+            }
+        }
+    }
+
+    // Клас для представлення інформації про готель
+    public class Hotel
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string Location { get; set; }
+        public int NumberOfRooms { get; set; }
+        public decimal PricePerNight { get; set; }
+        public string Amenities { get; set; }
+    }
+
+    // Клас для представлення запиту на бронювання
+    public class BookingRequest
+    {
+        public string Email { get; set; }
+        public string HotelName { get; set; }
+        public DateTime CheckInDate { get; set; }
+        public DateTime CheckOutDate { get; set; }
+    }
+}
