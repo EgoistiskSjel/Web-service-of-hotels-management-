@@ -10,8 +10,16 @@ jobs:
           name: Restore dependencies
           command: dotnet restore
       - run:
-          name: Build
+          name: Build the project
           command: dotnet build --configuration Release
+      - run:
+          name: Run tests
+          command: dotnet test --logger "trx;LogFileName=test-results.trx"
+  test:
+    docker:
+      - image: circleci/dotnetcore
+    steps:
+      - checkout
       - run:
           name: Run tests
           command: dotnet test --logger "trx;LogFileName=test-results.trx"
@@ -20,3 +28,6 @@ workflows:
   test:
     jobs:
       - build
+      - test:
+          requires:
+            - build
