@@ -1,33 +1,30 @@
 version: 2.1
 
+executors:
+  dotnet-executor:
+    docker:
+      - image: mcr.microsoft.com/dotnet/sdk:6.0  # Change version if needed
+
 jobs:
   build:
-    docker:
-      - image: circleci/dotnetcore
+    executor: dotnet-executor
     steps:
       - checkout
+
       - run:
           name: Restore dependencies
           command: dotnet restore
+
       - run:
           name: Build the project
           command: dotnet build --configuration Release
+
       - run:
           name: Run tests
           command: dotnet test --logger "trx;LogFileName=test-results.trx"
-  test:
-    docker:
-      - image: circleci/dotnetcore
-    steps:
-      - checkout
-      - run:
-          name: Run tests
-          command: dotnet test --logger "trx;LogFileName=test-results.trx"
+
 workflows:
   version: 2
-  test:
+  test-and-build:
     jobs:
       - build
-      - test:
-          requires:
-            - build
